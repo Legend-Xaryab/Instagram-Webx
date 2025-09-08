@@ -51,13 +51,16 @@ def index():
     user_id = session["user_id"]
     user_tasks = {tid: data for tid, data in tasks.items() if data["owner"] == user_id}
 
+    # pull error message if exists
+    error_message = session.pop("error_message", None)
+
     return render_template_string("""
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>Instax Loadēr</title>
+  <title>Instagram Bot Dashboard</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
   <style>
@@ -80,6 +83,13 @@ def index():
       <h1 class="text-4xl font-bold">Instagram Group Messenger</h1>
       <p class="text-blue-100 mt-2">Automated messaging made simple</p>
     </header>
+
+    <!-- Error Alert -->
+    {% if error_message %}
+      <div class="glass rounded-xl p-4 mb-6 text-red-200 bg-red-900/40 border border-red-500/50">
+        <i class="fa-solid fa-triangle-exclamation mr-2"></i> {{ error_message }}
+      </div>
+    {% endif %}
 
     <!-- Start Task Form -->
     <section class="glass rounded-2xl p-8 shadow-xl mb-12">
@@ -133,41 +143,59 @@ def index():
   </div>
 </body>
 </html>
-    """, user_tasks=user_tasks)
+    """, user_tasks=user_tasks, error_message=error_message)
 
 
 @app.route('/start', methods=['POST'])
 def start_task():
-    username = request.form['username']
-    password = request.form['password']
-    chat_id = request.form['chat_id']
-    delay = int(request.form['delay'])
+    try:
+        username = request.form['username']
+        password = request.form['password']
+        chat_id = request.form['chat_id']
+        delay = int(request.form['delay'])
 
-    messages_file = request.files['messages_file']
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], messages_file.filename)
-    messages_file.save(file_path)
+        # validate file upload
+        if 'messages_file' not in request.files:
+            session["error_message"] = "No message file uploaded."
+            return redirect(url_for("index"))
 
-    with open(file_path, 'r') as f:
-        messages = f.readlines()
+        messages_file = request.files['messages_file']
+        if messages_file.filename == "":
+            session["error_message"] = "Please select a valid .txt file."
+            return redirect(url_for("index"))
 
-    task_id = str(uuid.uuid4())[:8]
-    stop_event = threading.Event()
-    thread = threading.Thread(
-        target=message_sender,
-        args=(task_id, username, password, chat_id, delay, messages, stop_event),
-        daemon=True
-    )
-    thread.start()
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], messages_file.filename)
+        messages_file.save(file_path)
 
-    tasks[task_id] = {
-        "thread": thread,
-        "stop_event": stop_event,
-        "status": "running",
-        "info": {"username": username, "chat_id": chat_id, "delay": delay},
-        "owner": session["user_id"]
-    }
+        with open(file_path, 'r') as f:
+            messages = f.readlines()
+        if not messages:
+            session["error_message"] = "Your message file is empty."
+            return redirect(url_for("index"))
 
-    return redirect(url_for("index"))
+        # create task
+        task_id = str(uuid.uuid4())[:8]
+        stop_event = threading.Event()
+        thread = threading.Thread(
+            target=message_sender,
+            args=(task_id, username, password, chat_id, delay, messages, stop_event),
+            daemon=True
+        )
+        thread.start()
+
+        tasks[task_id] = {
+            "thread": thread,
+            "stop_event": stop_event,
+            "status": "running",
+            "info": {"username": username, "chat_id": chat_id, "delay": delay},
+            "owner": session["user_id"]
+        }
+
+        return redirect(url_for("index"))
+
+    except Exception as e:
+        session["error_message"] = f"Error starting task: {e}"
+        return redirect(url_for("index"))
 
 
 @app.route('/stop/<task_id>')
