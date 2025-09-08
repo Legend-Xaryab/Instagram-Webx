@@ -1,4 +1,4 @@
-from flask import Flask, request, redirect, url_for, session
+from flask import Flask, request, redirect, url_for, session, render_template_string
 from instagrapi import Client
 import os
 import time
@@ -6,7 +6,7 @@ import threading
 import uuid
 
 app = Flask(__name__)
-app.secret_key = "super_secret_key"  # required for sessions (change this!)
+app.secret_key = "super_secret_key"  # change this in production!
 
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -18,7 +18,7 @@ tasks = {}  # {task_id: {"thread": ..., "stop_event": ..., "status": ..., "info"
 
 def message_sender(task_id, username, password, chat_id, delay, messages, stop_event):
     """
-    Background thread that repeatedly sends messages until stopped.
+    Background thread to repeatedly send messages until stopped.
     """
     cl = Client()
     try:
@@ -45,125 +45,95 @@ def message_sender(task_id, username, password, chat_id, delay, messages, stop_e
 
 @app.route('/')
 def index():
-    # Ensure this user has a session ID
     if "user_id" not in session:
-        session["user_id"] = str(uuid.uuid4())  # assign unique ID per visitor
+        session["user_id"] = str(uuid.uuid4())
 
-    # Show only this user's tasks
     user_id = session["user_id"]
     user_tasks = {tid: data for tid, data in tasks.items() if data["owner"] == user_id}
 
-    task_list_html = ""
-    if user_tasks:
-        task_list_html += "<h3>Your Tasks</h3><ul>"
-        for tid, data in user_tasks.items():
-            task_list_html += f"<li><b>{tid}</b> - {data['status']} "
-            if data["status"] == "running":
-                task_list_html += f'<a href="/stop/{tid}"><button style="background:red;color:white;">Stop</button></a>'
-            task_list_html += "</li>"
-        task_list_html += "</ul>"
-    else:
-        task_list_html = "<h3>No tasks yet. Start one below 👇</h3>"
+    return render_template_string("""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Instax Loadēr</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+    *{font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial;}
+    .gradient-bg{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);}
+    .glass{background:rgba(255,255,255,.1);backdrop-filter:blur(8px);}
+    .floaty{animation:floaty 8s ease-in-out infinite;}
+    @keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+  </style>
+  <meta http-equiv="refresh" content="10"> <!-- auto refresh -->
+</head>
+<body class="min-h-screen gradient-bg text-white">
+  <div class="max-w-4xl mx-auto px-6 py-12">
+    <!-- Header -->
+    <header class="text-center mb-12">
+      <div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-white text-purple-600 shadow-xl mb-4 floaty">
+        <i class="fa-brands fa-instagram text-3xl"></i>
+      </div>
+      <h1 class="text-4xl font-bold">Instagram Group Messenger</h1>
+      <p class="text-blue-100 mt-2">Automated messaging made simple</p>
+    </header>
 
-    return f'''
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Instagram Group Message Bot</title>
-            <style>
-                body {{
-                    margin: 0;
-                    padding: 0;
-                    font-family: 'Segoe UI', sans-serif;
-                    background: linear-gradient(135deg, #6EE7B7, #3B82F6, #9333EA);
-                    background-size: 300% 300%;
-                    animation: gradientBG 10s ease infinite;
-                    display: flex;
-                    justify-content: center;
-                    align-items: flex-start;
-                    min-height: 100vh;
-                    color: #333;
-                    padding: 20px;
-                }}
-                @keyframes gradientBG {{
-                    0% {{background-position: 0% 50%;}}
-                    50% {{background-position: 100% 50%;}}
-                    100% {{background-position: 0% 50%;}}
-                }}
-                .container {{
-                    max-width: 600px;
-                    width: 100%;
-                    padding: 30px;
-                    margin-top: 20px;
-                    background-color: rgba(255, 255, 255, 0.95);
-                    box-shadow: 0px 8px 20px rgba(0, 0, 0, 0.2);
-                    border-radius: 20px;
-                    text-align: center;
-                    animation: fadeIn 1s ease forwards;
-                }}
-                @keyframes fadeIn {{
-                    from {{ opacity: 0; transform: translateY(30px) scale(0.95); }}
-                    to {{ opacity: 1; transform: translateY(0) scale(1); }}
-                }}
-                h2 {{
-                    margin-bottom: 20px;
-                    color: #111827;
-                    font-size: 1.8rem;
-                    animation: textGlow 2s infinite alternate;
-                }}
-                @keyframes textGlow {{
-                    from {{ text-shadow: 0 0 5px #3B82F6; }}
-                    to {{ text-shadow: 0 0 20px #9333EA; }}
-                }}
-                input, button {{
-                    width: 100%;
-                    padding: 12px;
-                    margin: 10px 0;
-                    border-radius: 10px;
-                    border: 1px solid #ccc;
-                    font-size: 1rem;
-                    transition: all 0.3s ease;
-                }}
-                input:focus {{
-                    border-color: #3B82F6;
-                    outline: none;
-                    box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
-                }}
-                button {{
-                    background: linear-gradient(45deg, #4CAF50, #3B82F6, #9333EA);
-                    color: white;
-                    font-weight: bold;
-                    cursor: pointer;
-                    border: none;
-                }}
-                button:hover {{
-                    transform: translateY(-3px) scale(1.05);
-                    box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
-                }}
-                button:active {{
-                    transform: scale(0.95);
-                }}
-            </style>
-            <meta http-equiv="refresh" content="10"> <!-- auto refresh every 10s -->
-        </head>
-        <body>
-            <div class="container">
-                <h2>🚀 Instagram Group Message Bot</h2>
-                <form action="/start" method="post" enctype="multipart/form-data">
-                    <input type="text" name="username" placeholder="Instagram Username" required>
-                    <input type="password" name="password" placeholder="Instagram Password" required>
-                    <input type="text" name="chat_id" placeholder="Target Group Chat ID" required>
-                    <input type="number" name="delay" placeholder="Delay (in seconds)" value="5" required>
-                    <input type="file" name="messages_file" accept=".txt" required>
-                    <button type="submit">✨ Start Messaging ✨</button>
-                </form>
-                <hr>
-                {task_list_html}
+    <!-- Start Task Form -->
+    <section class="glass rounded-2xl p-8 shadow-xl mb-12">
+      <h2 class="text-2xl font-semibold mb-6"><i class="fa-solid fa-paper-plane mr-2"></i> Start a New Task</h2>
+      <form action="/start" method="post" enctype="multipart/form-data" class="space-y-4">
+        <input type="text" name="username" placeholder="Instagram Username" required
+               class="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/20 focus:outline-none focus:ring-2 focus:ring-purple-400"/>
+        <input type="password" name="password" placeholder="Instagram Password" required
+               class="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/20 focus:outline-none focus:ring-2 focus:ring-purple-400"/>
+        <input type="text" name="chat_id" placeholder="Target Group Chat ID" required
+               class="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/20 focus:outline-none focus:ring-2 focus:ring-purple-400"/>
+        <input type="number" name="delay" placeholder="Delay (in seconds)" value="5" required
+               class="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/20 focus:outline-none focus:ring-2 focus:ring-purple-400"/>
+        <input type="file" name="messages_file" accept=".txt" required
+               class="w-full px-4 py-3 rounded-lg bg-white/20 text-white file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-purple-600 file:text-white hover:file:bg-purple-700"/>
+        <button type="submit"
+                class="w-full px-4 py-3 bg-purple-600 hover:bg-purple-700 rounded-lg text-white font-semibold transition flex items-center justify-center">
+          <i class="fa-solid fa-rocket mr-2"></i> Start Messaging
+        </button>
+      </form>
+    </section>
+
+    <!-- Running Tasks -->
+    <section>
+      <h2 class="text-2xl font-semibold mb-6"><i class="fa-solid fa-list mr-2"></i> Your Running Tasks</h2>
+      {% if user_tasks %}
+        <div class="space-y-4">
+          {% for tid, data in user_tasks.items() %}
+          <div class="glass rounded-xl p-6 flex items-center justify-between border border-white/10">
+            <div>
+              <p class="font-semibold">Task ID: {{ tid }}</p>
+              <p class="text-sm text-blue-200">Status: {{ data['status'] }} | Delay: {{ data['info']['delay'] }}s</p>
             </div>
-        </body>
-        </html>
-    '''
+            {% if data['status'] == 'running' %}
+              <a href="/stop/{{ tid }}" class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm transition">
+                <i class="fa-solid fa-stop mr-1"></i> Stop
+              </a>
+            {% else %}
+              <span class="px-4 py-2 bg-gray-500 rounded-lg text-sm">Stopped</span>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="text-center py-12 text-blue-200">
+          <i class="fa-solid fa-circle-check text-5xl mb-4"></i>
+          <p>No active tasks right now.</p>
+        </div>
+      {% endif %}
+    </section>
+  </div>
+</body>
+</html>
+    """, user_tasks=user_tasks)
 
 
 @app.route('/start', methods=['POST'])
